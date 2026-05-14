@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentc"
+version = "0.1.0"
+description = "Compile an agent skill into a standalone, runnable agent project."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Austin Marshall" }]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "typer>=0.12",
+    "python-frontmatter>=1.1",
+    "jinja2>=3.1",
+    "tomli>=2.0; python_version<'3.11'",
+    "tomli-w>=1.0",
+]
+
+[project.scripts]
+agentc = "agentc.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["agentc*"]

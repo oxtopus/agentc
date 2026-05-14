@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import typer
+
+from agentc import __version__
+from agentc.adapters import ADAPTERS
+from agentc.ingest import parse
+from agentc.ir import CompileOpts, ParsedSkill
+from agentc import registry, util
+
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Compile an agent skill into a standalone, runnable agent project.",
+)
+
+DEFAULT_REPO = Path("/home/austin/agentc")
+
+
+def _repo_root() -> Path:
+    env = os.environ.get("AGENTC_REPO")
+    return Path(env).resolve() if env else DEFAULT_REPO
+
+
+def _write_agent_toml(
+    agent_dir: Path,
+    *,
+    name: str,
+    skill: ParsedSkill,
+    source_hash: str,
+    harnesses: list[str],
+) -> None:
+    existing_overrides = ""
+    toml_path = agent_dir / "agent.toml"
+    if toml_path.is_file():
+        text = toml_path.read_text()
+        if "[user_overrides]" in text:
+            existing_overrides = text.split("[user_overrides]", 1)[1]
+    body = (
+        f'name = "{name}"\n'
+        f'source_path = "{skill.source_dir}"\n'
+        f'source_hash = "{source_hash}"\n'
+        f'agentc_version = "{__version__}"\n'
+        f'compiled_at = "{datetime.now(timezone.utc).isoformat()}"\n'
+        f"harnesses = {json.dumps(harnesses)}\n"
+        f"\n[user_overrides]\n{existing_overrides.lstrip() if existing_overrides else ''}"
+    )
+    toml_path.write_text(body)
+
+
+def _write_shared(agent_dir: Path, skill: ParsedSkill, harnesses: list[str]) -> None:
+    skill_dst = agent_dir / "skill"
+    if skill_dst.exists():
+        shutil.rmtree(skill_dst)
+    shutil.copytree(skill.source_dir, skill_dst)
+
+    env_example = agent_dir / ".env.example"
+    if not env_example.is_file():
+        env_example.write_text(
+            "ANTHROPIC_API_KEY=\n"
+            "# If using Bedrock instead of the Anthropic API:\n"
+            "# AWS_PROFILE=\n"
+            "# AWS_REGION=\n"
+        )
+
+    gitignore = agent_dir / ".gitignore"
+    if not gitignore.is_file():
+        gitignore.write_text(".env\n.venv/\n__pycache__/\n")
+
+    run_targets = "\n".join(f"- `{h}/run.sh`" for h in harnesses)
+    readme = agent_dir / "README.md"
+    readme.write_text(
+        f"# {skill.name}\n\n"
+        f"{skill.description}\n\n"
+        "## Run\n\n"
+        f"{run_targets}\n\n"
+        "## Source\n\n"
+        f"Compiled from `{skill.source_dir}` via `agentc`. "
+        "Use `agentc update` to re-compile after the source skill changes.\n"
+    )
+
+
+def _compile(skill_path: Path, *, name: str | None, harnesses: list[str], force: bool) -> Path:
+    skill = parse(skill_path)
+    agent_name = util.slugify(name or skill.name)
+    repo = _repo_root()
+    agent_dir = repo / agent_name
+
+    if agent_dir.exists() and not force:
+        existing_marker = agent_dir / "agent.toml"
+        if not existing_marker.is_file():
+            raise typer.BadParameter(
+                f"{agent_dir} exists and is not an agentc-managed directory; refusing to overwrite."
+            )
+
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    _write_shared(agent_dir, skill, harnesses)
+
+    opts = CompileOpts(name=agent_name, out_dir=agent_dir, harnesses=harnesses, force=force)
+    for h in harnesses:
+        cls = ADAPTERS.get(h)
+        if cls is None:
+            raise typer.BadParameter(f"Unknown harness: {h}. Known: {sorted(ADAPTERS)}")
+        cls().emit(skill, agent_dir, opts)
+
+    source_hash = util.hash_dir(skill.source_dir)
+    _write_agent_toml(
+        agent_dir, name=agent_name, skill=skill, source_hash=source_hash, harnesses=harnesses
+    )
+    registry.upsert(
+        repo,
+        name=agent_name,
+        source_path=skill.source_dir,
+        source_hash=source_hash,
+        harnesses=harnesses,
+    )
+    if skill.sibling_refs:
+        typer.echo(
+            f"  warning: source skill references {len(skill.sibling_refs)} sibling skill(s) "
+            f"not bundled: {', '.join(skill.sibling_refs)}",
+            err=True,
+        )
+    return agent_dir
+
+
+@app.command()
+def validate(skill_path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True)) -> None:
+    """Parse a skill and print its IR. No writes."""
+    skill = parse(skill_path)
+    out = {
+        "name": skill.name,
+        "description": skill.description[:120] + ("…" if len(skill.description) > 120 else ""),
+        "allowed_tools": skill.allowed_tools,
+        "source_dir": str(skill.source_dir),
+        "section_count": len(skill.sections),
+        "conditional_sections": sum(1 for s in skill.sections if s.conditional),
+        "reference_files": len(skill.references),
+        "rule_files": len(skill.rules),
+        "sibling_refs": skill.sibling_refs,
+    }
+    typer.echo(json.dumps(out, indent=2))
+
+
+@app.command()
+def compile(
+    skill_path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True),
+    harness: list[str] = typer.Option(
+        ["claude-code"],
+        "--harness",
+        "-h",
+        help="Harness to emit (repeatable). Default: claude-code.",
+    ),
+    name: str = typer.Option(None, "--name", help="Compiled agent name (default: skill name)."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing compiled agent."),
+) -> None:
+    """Compile a skill into a standalone agent project."""
+    agent_dir = _compile(skill_path, name=name, harnesses=list(harness), force=force)
+    typer.echo(f"compiled: {agent_dir}")
+
+
+@app.command(name="list")
+def list_cmd() -> None:
+    """List compiled agents."""
+    data = registry.load(_repo_root())
+    agents = data.get("agents", [])
+    if not agents:
+        typer.echo("(no compiled agents)")
+        return
+    width = max(len(a["name"]) for a in agents)
+    for a in agents:
+        harnesses = ",".join(a.get("harnesses", []))
+        typer.echo(f"{a['name']:<{width}}  {harnesses}  {a.get('source_path', '')}")
+
+
+@app.command()
+def run(
+    name: str,
+    harness: str = typer.Option("claude-code", "--harness", "-h"),
+) -> None:
+    """Run a compiled agent via its harness entrypoint."""
+    repo = _repo_root()
+    if not registry.find(repo, name):
+        typer.echo(f"unknown agent: {name}", err=True)
+        raise typer.Exit(code=1)
+    cls = ADAPTERS.get(harness)
+    if cls is None:
+        typer.echo(f"unknown harness: {harness}", err=True)
+        raise typer.Exit(code=1)
+    entry = cls().entrypoint(repo / name)
+    if not entry.is_file():
+        typer.echo(f"missing entrypoint: {entry}", err=True)
+        raise typer.Exit(code=1)
+    os.execvp(str(entry), [str(entry)])
+
+
+@app.command()
+def update(name: str) -> None:
+    """Re-compile an agent from its recorded source skill."""
+    repo = _repo_root()
+    entry = registry.find(repo, name)
+    if not entry:
+        typer.echo(f"unknown agent: {name}", err=True)
+        raise typer.Exit(code=1)
+    skill_path = Path(entry["source_path"])
+    if not skill_path.is_dir():
+        typer.echo(f"source skill missing: {skill_path}", err=True)
+        raise typer.Exit(code=1)
+    agent_dir = _compile(
+        skill_path,
+        name=name,
+        harnesses=entry.get("harnesses", ["claude-code"]),
+        force=True,
+    )
+    typer.echo(f"updated: {agent_dir}")
+
+
+@app.command()
+def remove(name: str, force: bool = typer.Option(False, "--force")) -> None:
+    """Delete a compiled agent and remove it from the manifest."""
+    repo = _repo_root()
+    agent_dir = repo / name
+    if not registry.find(repo, name):
+        typer.echo(f"unknown agent: {name}", err=True)
+        raise typer.Exit(code=1)
+    if not force:
+        typer.confirm(f"Delete {agent_dir}?", abort=True)
+    if agent_dir.exists():
+        shutil.rmtree(agent_dir)
+    registry.remove(repo, name)
+    typer.echo(f"removed: {name}")
+
+
+@app.command()
+def version() -> None:
+    """Print the agentc version."""
+    typer.echo(__version__)
+
+
+if __name__ == "__main__":
+    app()
