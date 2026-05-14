@@ -66,7 +66,10 @@ def _write_shared(agent_dir: Path, skill: ParsedSkill, harnesses: list[str]) -> 
     if not env_example.is_file():
         env_example.write_text(
             "ANTHROPIC_API_KEY=\n"
+            "# Optional: pin a specific model. Format depends on auth backend.\n"
+            "# ANTHROPIC_MODEL=\n"
             "# If using Bedrock instead of the Anthropic API:\n"
+            "# CLAUDE_CODE_USE_BEDROCK=1\n"
             "# AWS_PROFILE=\n"
             "# AWS_REGION=\n"
         )
@@ -180,12 +183,19 @@ def list_cmd() -> None:
         typer.echo(f"{a['name']:<{width}}  {harnesses}  {a.get('source_path', '')}")
 
 
-@app.command()
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 def run(
+    ctx: typer.Context,
     name: str,
     harness: str = typer.Option("claude-code", "--harness", "-h"),
 ) -> None:
-    """Run a compiled agent via its harness entrypoint."""
+    """Run a compiled agent via its harness entrypoint.
+
+    Extra positional args become a one-shot prompt (non-interactive).
+    Pass flags after `--` to forward them verbatim to the underlying tool.
+    """
     repo = _repo_root()
     if not registry.find(repo, name):
         typer.echo(f"unknown agent: {name}", err=True)
@@ -198,7 +208,14 @@ def run(
     if not entry.is_file():
         typer.echo(f"missing entrypoint: {entry}", err=True)
         raise typer.Exit(code=1)
-    os.execvp(str(entry), [str(entry)])
+
+    extras = list(ctx.args)
+    forward: list[str]
+    if extras and all(not a.startswith("-") for a in extras):
+        forward = ["-p", " ".join(extras)]
+    else:
+        forward = extras
+    os.execvp(str(entry), [str(entry), *forward])
 
 
 @app.command()

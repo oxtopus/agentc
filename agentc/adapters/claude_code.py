@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-import shutil
+import shlex
 from pathlib import Path
 
 from agentc.ir import CompileOpts, ParsedSkill
@@ -14,35 +13,27 @@ class ClaudeCodeAdapter:
         cc_dir = agent_dir / "claude-code"
         cc_dir.mkdir(parents=True, exist_ok=True)
 
-        settings = {
-            "model": opts.model,
-            "permissions": {"allow": list(skill.allowed_tools)},
-        }
-        claude_dir = cc_dir / ".claude"
-        claude_dir.mkdir(parents=True, exist_ok=True)
-        (claude_dir / "settings.json").write_text(
-            json.dumps(settings, indent=2, sort_keys=True) + "\n"
-        )
-
-        skills_dst = claude_dir / "skills" / skill.name
-        if skills_dst.exists():
-            shutil.rmtree(skills_dst)
-        skills_dst.mkdir(parents=True)
-        (skills_dst / "SKILL.md").write_text((skill.source_dir / "SKILL.md").read_text())
-        for sub in ("references", "rules"):
-            src = skill.source_dir / sub
-            if src.is_dir():
-                shutil.copytree(src, skills_dst / sub)
+        allowed_args = " ".join(shlex.quote(t) for t in skill.allowed_tools)
 
         run_sh = cc_dir / "run.sh"
         run_sh.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             'HERE="$(cd "$(dirname "$0")" && pwd)"\n'
-            'cd "$HERE"\n'
-            'export CLAUDE_HOME="$HERE/.claude"\n'
-            'export CLAUDE_CONFIG_DIR="$HERE/.claude"\n'
-            'exec claude "$@"\n'
+            'AGENT_DIR="$(cd "$HERE/.." && pwd)"\n'
+            'cd "$AGENT_DIR"\n'
+            'if [ -f "$AGENT_DIR/.env" ]; then\n'
+            '  set -a\n'
+            '  # shellcheck disable=SC1091\n'
+            '  . "$AGENT_DIR/.env"\n'
+            '  set +a\n'
+            'fi\n'
+            'exec claude \\\n'
+            '  --bare \\\n'
+            '  --append-system-prompt-file "$AGENT_DIR/skill/SKILL.md" \\\n'
+            '  --add-dir "$AGENT_DIR/skill" \\\n'
+            f'  --allowedTools {allowed_args} \\\n'
+            '  "$@"\n'
         )
         run_sh.chmod(0o755)
 
