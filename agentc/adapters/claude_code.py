@@ -13,7 +13,12 @@ class ClaudeCodeAdapter:
         cc_dir = agent_dir / "claude-code"
         cc_dir.mkdir(parents=True, exist_ok=True)
 
-        allowed_args = " ".join(shlex.quote(t) for t in skill.allowed_tools)
+        allowed_arg = ",".join(skill.allowed_tools)
+        allowed_line = (
+            f"  --allowedTools {shlex.quote(allowed_arg)} \\\n"
+            if skill.allowed_tools
+            else ""
+        )
 
         run_sh = cc_dir / "run.sh"
         run_sh.write_text(
@@ -32,7 +37,7 @@ class ClaudeCodeAdapter:
             '  --bare \\\n'
             '  --append-system-prompt-file "$AGENT_DIR/skill/SKILL.md" \\\n'
             '  --add-dir "$AGENT_DIR/skill" \\\n'
-            f'  --allowedTools {allowed_args} \\\n'
+            f'{allowed_line}'
             '  "$@"\n'
         )
         run_sh.chmod(0o755)

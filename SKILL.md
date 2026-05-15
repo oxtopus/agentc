@@ -29,7 +29,7 @@ agentc compile /home/austin/.agents/skills/firecrawl
 agentc run firecrawl
 ```
 
-This emits `/home/austin/agentc/firecrawl/` with `skill/`, `claude-code/`, `agent.toml`, and a `run.sh`. The compiled agent uses an isolated `CLAUDE_HOME` so it does not inherit global Claude Code settings or hooks.
+This emits `/home/austin/agentc/firecrawl/` with `skill/`, `claude-code/`, `agent.toml`, and a `run.sh`. The compiled agent runs `claude --bare`, which skips global hooks, auto-memory, plugin sync, and `CLAUDE.md` auto-discovery — the agent does not inherit your global Claude Code state.
 
 ## Choosing a harness
 

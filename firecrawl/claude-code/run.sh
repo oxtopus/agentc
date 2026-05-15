@@ -13,5 +13,5 @@ exec claude \
   --bare \
   --append-system-prompt-file "$AGENT_DIR/skill/SKILL.md" \
   --add-dir "$AGENT_DIR/skill" \
-  --allowedTools 'Bash(firecrawl *)' 'Bash(npx firecrawl *)' \
+  --allowedTools 'Bash(firecrawl *),Bash(npx firecrawl *)' \
   "$@"

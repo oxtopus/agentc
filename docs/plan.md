@@ -1,5 +1,7 @@
 # agentc — Implementation Plan
 
+**Status:** v0 implemented; superseded by `README.md` and `SKILL.md`. Isolation is provided by `claude --bare` rather than a per-agent `CLAUDE_HOME`/`settings.json` scaffold (see `agentc/adapters/claude_code.py`).
+
 ## Context
 
 Skills (SKILL.md + frontmatter + references/rules) live inside an agent harness like Claude Code and are loaded into a session on demand. They're useful, but they're not portable — you can't hand someone "the firecrawl skill as a standalone tool" without also handing them the harness, settings, hooks, and ambient state.

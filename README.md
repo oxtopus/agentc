@@ -4,7 +4,7 @@ Compile an agent skill into a standalone, runnable agent project.
 
 `agentc` reads a skill (a `SKILL.md` with YAML frontmatter, plus optional `references/` and `rules/` subdirectories) and emits a self-contained agent project that runs on its own. The compiled agent lives as a sibling subdirectory of this repo and is git-tracked as part of the monorepo.
 
-Initial output target is Claude Code (with an isolated `CLAUDE_HOME`). OpenCode, Codex, and raw Claude API adapters will follow.
+Initial output target is Claude Code (run via `--bare`, which skips global hooks, auto-memory, plugin sync, and `CLAUDE.md` auto-discovery). OpenCode, Codex, and raw Claude API adapters will follow.
 
 ## Why
 
