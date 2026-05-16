@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,9 @@ app = typer.Typer(
     help="Compile an agent skill into a standalone, runnable agent project.",
 )
 
+_AGENT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
 def _repo_root() -> Path:
     env = os.environ.get("AGENTC_REPO")
     if env:
@@ -35,6 +39,35 @@ def _repo_root() -> Path:
         if (parent / ".agentc" / "manifest.json").is_file():
             return parent
     return Path.home() / ".agentc-repo"
+
+
+def _validate_agent_name(name: str) -> str:
+    if not isinstance(name, str) or not name:
+        raise typer.BadParameter("agent name must be a non-empty string")
+    if not _AGENT_NAME_RE.match(name):
+        raise typer.BadParameter(
+            f"invalid agent name {name!r}: must match {_AGENT_NAME_RE.pattern}"
+        )
+    return name
+
+
+def _is_relative_to(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _agent_dir(repo: Path, name: str) -> Path:
+    _validate_agent_name(name)
+    repo_resolved = repo.resolve()
+    candidate = (repo_resolved / name).resolve()
+    if not _is_relative_to(candidate, repo_resolved) or candidate == repo_resolved:
+        raise typer.BadParameter(
+            f"agent path {candidate} escapes repo {repo_resolved}"
+        )
+    return candidate
 
 
 def _write_agent_toml(
@@ -57,6 +90,7 @@ def _write_agent_toml(
         "agentc_version": __version__,
         "compiled_at": datetime.now(timezone.utc).isoformat(),
         "harnesses": harnesses,
+        "sibling_refs": list(skill.sibling_refs),
         "user_overrides": user_overrides,
     }
     toml_path.write_text(tomli_w.dumps(doc))
@@ -66,7 +100,7 @@ def _write_shared(agent_dir: Path, skill: ParsedSkill, harnesses: list[str]) -> 
     skill_dst = agent_dir / "skill"
     if skill_dst.exists():
         shutil.rmtree(skill_dst)
-    shutil.copytree(skill.source_dir, skill_dst)
+    util.copy_tracked_tree(skill.source_dir, skill_dst)
 
     env_example = agent_dir / ".env.example"
     if not env_example.is_file():
@@ -101,7 +135,22 @@ def _compile(skill_path: Path, *, name: str | None, harnesses: list[str], force:
     skill = parse(skill_path)
     agent_name = util.slugify(name or skill.name)
     repo = _repo_root()
-    agent_dir = repo / agent_name
+    agent_dir = _agent_dir(repo, agent_name)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for h in harnesses:
+        if h in seen:
+            continue
+        seen.add(h)
+        deduped.append(h)
+    harnesses = deduped
+
+    unknown = [h for h in harnesses if h not in ADAPTERS]
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown harness(es): {', '.join(unknown)}. Known: {sorted(ADAPTERS)}"
+        )
 
     if agent_dir.exists() and not force:
         existing_marker = agent_dir / "agent.toml"
@@ -115,10 +164,7 @@ def _compile(skill_path: Path, *, name: str | None, harnesses: list[str], force:
 
     opts = CompileOpts(name=agent_name, out_dir=agent_dir, harnesses=harnesses, force=force)
     for h in harnesses:
-        cls = ADAPTERS.get(h)
-        if cls is None:
-            raise typer.BadParameter(f"Unknown harness: {h}. Known: {sorted(ADAPTERS)}")
-        cls().emit(skill, agent_dir, opts)
+        ADAPTERS[h]().emit(skill, agent_dir, opts)
 
     source_hash = util.hash_dir(skill.source_dir)
     _write_agent_toml(
@@ -213,7 +259,7 @@ def run(
     if cls is None:
         typer.echo(f"unknown harness: {harness}", err=True)
         raise typer.Exit(code=1)
-    entry = cls().entrypoint(repo / name)
+    entry = cls().entrypoint(_agent_dir(repo, name))
     if not entry.is_file():
         typer.echo(f"missing entrypoint: {entry}", err=True)
         raise typer.Exit(code=1)
@@ -252,13 +298,25 @@ def update(name: str) -> None:
 def remove(name: str, force: bool = typer.Option(False, "--force")) -> None:
     """Delete a compiled agent and remove it from the manifest."""
     repo = _repo_root()
-    agent_dir = repo / name
     if not registry.find(repo, name):
         typer.echo(f"unknown agent: {name}", err=True)
+        raise typer.Exit(code=1)
+    try:
+        agent_dir = _agent_dir(repo, name)
+    except typer.BadParameter as e:
+        typer.echo(f"refusing to remove {name!r}: {e}", err=True)
+        registry.remove(repo, name)
         raise typer.Exit(code=1)
     if not force:
         typer.confirm(f"Delete {agent_dir}?", abort=True)
     if agent_dir.exists():
+        if not (agent_dir / "agent.toml").is_file():
+            typer.echo(
+                f"refusing to remove {agent_dir}: not an agentc-managed directory "
+                "(no agent.toml)",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         shutil.rmtree(agent_dir)
     registry.remove(repo, name)
     typer.echo(f"removed: {name}")

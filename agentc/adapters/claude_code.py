@@ -38,6 +38,7 @@ class ClaudeCodeAdapter:
             '  --append-system-prompt-file "$AGENT_DIR/skill/SKILL.md" \\\n'
             '  --add-dir "$AGENT_DIR/skill" \\\n'
             f'{allowed_line}'
+            '  -- \\\n'
             '  "$@"\n'
         )
         run_sh.chmod(0o755)
