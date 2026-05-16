@@ -32,4 +32,3 @@ class CompileOpts:
     out_dir: Path
     harnesses: list[str]
     force: bool = False
-    model: str = "claude-opus-4-7"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import shutil
 from pathlib import Path
 
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache", ".pytest_cache"}
@@ -34,14 +33,3 @@ def hash_dir(path: Path) -> str:
         h.update(f.read_bytes())
         h.update(b"\0")
     return "sha256:" + h.hexdigest()
-
-
-def copy_tree(src: Path, dst: Path) -> None:
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
-
-
-def write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)

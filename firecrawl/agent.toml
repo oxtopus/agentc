@@ -2,7 +2,9 @@ name = "firecrawl"
 source_path = "/home/austin/.agents/skills/firecrawl"
 source_hash = "sha256:431dec4fc3118809e74396a00e29df61ad395bd7f77f290268ccb3827a0637e2"
 agentc_version = "0.1.0"
-compiled_at = "2026-05-15T21:21:49.453534+00:00"
-harnesses = ["claude-code"]
+compiled_at = "2026-05-16T16:35:15.766732+00:00"
+harnesses = [
+    "claude-code",
+]
 
 [user_overrides]
