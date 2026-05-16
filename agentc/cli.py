@@ -8,6 +8,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+import tomli_w
 import typer
 
 from agentc import __version__
@@ -38,22 +43,21 @@ def _write_agent_toml(
     source_hash: str,
     harnesses: list[str],
 ) -> None:
-    existing_overrides = ""
     toml_path = agent_dir / "agent.toml"
+    user_overrides: dict = {}
     if toml_path.is_file():
-        text = toml_path.read_text()
-        if "[user_overrides]" in text:
-            existing_overrides = text.split("[user_overrides]", 1)[1]
-    body = (
-        f'name = "{name}"\n'
-        f'source_path = "{skill.source_dir}"\n'
-        f'source_hash = "{source_hash}"\n'
-        f'agentc_version = "{__version__}"\n'
-        f'compiled_at = "{datetime.now(timezone.utc).isoformat()}"\n'
-        f"harnesses = {json.dumps(harnesses)}\n"
-        f"\n[user_overrides]\n{existing_overrides.lstrip() if existing_overrides else ''}"
-    )
-    toml_path.write_text(body)
+        existing = tomllib.loads(toml_path.read_text())
+        user_overrides = existing.get("user_overrides", {})
+    doc = {
+        "name": name,
+        "source_path": str(skill.source_dir),
+        "source_hash": source_hash,
+        "agentc_version": __version__,
+        "compiled_at": datetime.now(timezone.utc).isoformat(),
+        "harnesses": harnesses,
+        "user_overrides": user_overrides,
+    }
+    toml_path.write_text(tomli_w.dumps(doc))
 
 
 def _write_shared(agent_dir: Path, skill: ParsedSkill, harnesses: list[str]) -> None:
@@ -189,7 +193,7 @@ def list_cmd() -> None:
 def run(
     ctx: typer.Context,
     name: str,
-    harness: str = typer.Option("claude-code", "--harness", "-h"),
+    harness: str | None = typer.Option(None, "--harness", "-h"),
 ) -> None:
     """Run a compiled agent via its harness entrypoint.
 
@@ -197,9 +201,12 @@ def run(
     Pass flags after `--` to forward them verbatim to the underlying tool.
     """
     repo = _repo_root()
-    if not registry.find(repo, name):
+    entry_meta = registry.find(repo, name)
+    if not entry_meta:
         typer.echo(f"unknown agent: {name}", err=True)
         raise typer.Exit(code=1)
+    if harness is None:
+        harness = (entry_meta.get("harnesses") or ["claude-code"])[0]
     cls = ADAPTERS.get(harness)
     if cls is None:
         typer.echo(f"unknown harness: {harness}", err=True)

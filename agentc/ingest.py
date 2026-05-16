@@ -6,6 +6,7 @@ from pathlib import Path
 import frontmatter
 
 from agentc.ir import ParsedSkill, SkillSection
+from agentc.util import iter_tracked_files
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -42,12 +43,6 @@ def _split_sections(body: str) -> list[SkillSection]:
     return sections
 
 
-def _list_files(path: Path) -> list[Path]:
-    if not path.is_dir():
-        return []
-    return sorted(p for p in path.rglob("*") if p.is_file())
-
-
 def parse(skill_path: Path) -> ParsedSkill:
     skill_path = skill_path.resolve()
     skill_md = skill_path / "SKILL.md"
@@ -67,8 +62,8 @@ def parse(skill_path: Path) -> ParsedSkill:
         allowed_tools = [str(t).strip() for t in raw_tools if str(t).strip()]
 
     sections = _split_sections(body)
-    references = _list_files(skill_path / "references")
-    rules = _list_files(skill_path / "rules")
+    references = iter_tracked_files(skill_path / "references")
+    rules = iter_tracked_files(skill_path / "rules")
     sibling_refs = sorted(set(SIBLING_RE.findall(body)))
 
     return ParsedSkill(
