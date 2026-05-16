@@ -26,12 +26,15 @@ app = typer.Typer(
     help="Compile an agent skill into a standalone, runnable agent project.",
 )
 
-DEFAULT_REPO = Path("/home/austin/agentc")
-
-
 def _repo_root() -> Path:
     env = os.environ.get("AGENTC_REPO")
-    return Path(env).resolve() if env else DEFAULT_REPO
+    if env:
+        return Path(env).resolve()
+    cur = Path.cwd().resolve()
+    for parent in [cur, *cur.parents]:
+        if (parent / ".agentc" / "manifest.json").is_file():
+            return parent
+    return Path.home() / ".agentc-repo"
 
 
 def _write_agent_toml(
@@ -178,7 +181,7 @@ def list_cmd() -> None:
     data = registry.load(_repo_root())
     agents = data.get("agents", [])
     if not agents:
-        typer.echo("(no compiled agents)")
+        typer.echo(f"(no compiled agents under {_repo_root()})")
         return
     width = max(len(a["name"]) for a in agents)
     for a in agents:

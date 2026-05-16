@@ -15,7 +15,8 @@ The name reads as a compiler (`gcc` / `rustc` / `tsc` → `agentc`). The framing
 ## Install
 
 ```bash
-pipx install -e /home/austin/agentc
+git clone <repo-url> ~/agentc && cd ~/agentc
+pipx install -e .
 ```
 
 Or run via the package directly:

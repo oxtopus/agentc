@@ -9,7 +9,7 @@ allowed-tools:
 
 # agentc
 
-Compile a skill (SKILL.md + optional `references/` and `rules/`) into a self-contained, runnable agent project. The compiled agent lives as a sibling subdirectory of `/home/austin/agentc/` and runs against an isolated Claude Code environment by default.
+Compile a skill (SKILL.md + optional `references/` and `rules/`) into a self-contained, runnable agent project. The compiled agent lives as a sibling subdirectory of the agentc repo root (discovered via `AGENTC_REPO`, the nearest `.agentc/manifest.json`, or `~/.agentc-repo`) and runs against an isolated Claude Code environment by default.
 
 ## Commands
 
